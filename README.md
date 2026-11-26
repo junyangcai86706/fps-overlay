@@ -1,87 +1,239 @@
 # FPS 悬浮窗（Android 帧率 / 温度监控）
 
-一个轻量的 Android 悬浮窗，实时显示**硬件实测帧率**、屏幕刷新率、电池温度，以及**全部 thermal_zone 传感器温度**，并支持帧率/温度曲线记录、缩放查看。
+一个轻量的 Android 悬浮窗：实时显示**硬件实测帧率**、屏幕刷新率、电池温度、**全部 thermal_zone 传感器温度**，并支持帧率/温度曲线记录与缩放查看。
 
-> 本项目是在一台 **OnePlus Ace 7 Pro（PMS110 / Android 17 / 骁龙 8 系）** 上开发验证的，针对该平台做了适配。换机型前请先读「兼容性」一节。
+开发验证机型：**OnePlus Ace 7 Pro（PMS110 / Android 17 / 骁龙 8 系 / 内核 6.12.69）**。
 
-## 功能
+---
 
-- **帧率**：读取高通 SDE 显示管线的 `measured_fps` 节点，是硬件真实出帧数（不是估算）
-- **屏幕刷新率**：`dumpsys display` 的 `activeMode vsyncRate`
-- **电池温度**：`BatteryManager`
-- **全部温度传感器**：遍历 `/sys/class/thermal/thermal_zone*`，逐项可开关，自动过滤 `*trip*` 阈值节点
-- **中文名称映射**：`cpu-0-2-1` → `CPU0核2-1`、`gpuss-3` → `GPU核3`、`qmx-1-0` → `内存1-0`
-- **温度分色**：<60℃ 白、60–80℃ 黄、>80℃ 红
-- **仅在游戏内显示**：读取前台包名，可配置游戏列表
-- **悬浮窗自身**：可拖动、可收起（—）、可关闭（✕）、透明度与缩放可调、可设触摸穿透（不挡游戏）
-- **曲线记录**：帧率 + CPU 温度按间隔写入 CSV，支持
-  - 熄屏/待机是否记录
-  - 只在指定 App 前台时记录
-  - 单次最长记录时长
-  - 只保留最近 N 分钟
-- **曲线查看**：双指缩放、空白处平移、按白线拖动看数值、10 档双轴刻度、FPS/温度双虚线标记、横屏、数值列表点击跳转
+## 一、这个工具能用在哪台手机？
 
-## 原理
+分三块看，**不是所有机型都全功能可用**。
 
-应用本身**不申请 root**，所有需要 root 的读取由一个独立脚本在 root shell 里完成，把数据写进应用私有目录：
+| 能力 | 数据来源 | 谁有 |
+|---|---|---|
+| **帧率（核心）** | `/sys/class/drm/card0-sde-crtc-0/measured_fps` | **仅高通（骁龙）平台的 SDE 显示驱动**，且内核暴露该节点 |
+| 温度 | `/sys/class/thermal/thermal_zone*` | Linux 标准接口，**几乎全部 Android** 都有 |
+| 屏幕刷新率 | `dumpsys display` 的 `vsyncRate` | **通用** |
+| 前台应用识别 | `dumpsys window` 的 `mCurrentFocus` | **通用**（个别 ROM 输出格式不同） |
+| 读取以上 sysfs | root | 无 root 只能读电池温度 |
 
-```
-/data/data/<pkg>/files/fps.txt          # 帧率
-/data/data/<pkg>/files/thermal.txt      # 全部温度（TSV）
-/data/data/<pkg>/files/refresh.txt      # 刷新率
-/data/data/<pkg>/files/foreground.txt   # 前台包名
-/data/data/<pkg>/files/record.csv       # 曲线记录
-/data/data/<pkg>/files/screen_state     # 亮屏/熄屏（应用写入）
-/data/data/<pkg>/files/record.cfg       # 记录配置
-```
+### 机型分类
 
-脚本 `fps_feed.sh` 每 2 秒采样一次，用 `chown` 把文件交给应用 uid，应用直接读文件即可。
+| 平台 | 帧率 | 温度 | 说明 |
+|---|---|---|---|
+| 骁龙 8 系（SM8550/8650/8750 等） | ✅ 大概率可用 | ✅ | 本项目验证环境 |
+| 骁龙 7 系 / 6 系 | ⚠️ 部分可用 | ✅ | 取决于内核是否导出 `measured_fps` |
+| 联发科天玑 | ❌ 无此节点 | ✅ | 帧率会显示 `--`，温度正常 |
+| 三星 Exynos | ❌ | ✅ | 同上 |
+| 华为麒麟 | ❌ | ✅ | 同上 |
+| Google Tensor | ⚠️ 部分 | ✅ | 需实测 |
 
-## 构建
+### 30 秒判定你的手机能不能用
 
-依赖：
-- JDK 8+
-- Android SDK：`platforms/android-XX/android.jar`、`build-tools`（含 `d8`、`zipalign`、`apksigner`）
-- Python 3
+把 `probe.sh` 推到手机，用 root 跑一次：
 
 ```bash
-export ANDROID_JAR=/path/to/android.jar
+adb push probe.sh /data/local/tmp/
+su -c "sh /data/local/tmp/probe.sh"
+```
+
+它会输出：设备型号、root 状态、**是否存在帧率节点**、thermal 传感器数量、刷新率、前台窗口、电池温度，最后给一行结论。
+
+- 看到 `帧率: 可用` → 全功能
+- 看到 `帧率: 不可用` → 温度/刷新率可用，帧率需要自己改脚本里的节点路径（见第六节）
+
+---
+
+## 二、前置条件（配件 / 环境）
+
+| 需要 | 说明 |
+|---|---|
+| **root 权限** | 能执行 `su -c`。Magisk / KernelSU / APatch 均可；本项目是在**临时 root（内核 LPE，不刷机）**环境下验证的 |
+| **配套脚本 `fps_feed.sh`** | root 侧采样脚本，必须部署并运行，否则帧率/温度读不到 |
+| Android 8.0+ | `minSdk 26` |
+| 一个存放脚本的目录 | 建议 `/data/adb/JN/bin/`（KernelSU/Magisk 通用），任意可执行目录也可以 |
+
+> 无 root 时应用能装、能开，但只显示电池温度，其余一律 `--`。
+
+---
+
+## 三、安装与部署（分步）
+
+### 步骤 1：装 APK
+
+```bash
+adb install -r FPSOverlay.apk
+```
+
+或直接把 APK 拷到手机点安装。
+
+### 步骤 2：授予悬浮窗权限
+
+打开 App → 点「授予悬浮窗权限」→ 在系统页面允许「显示在其他应用上层」。
+（也可用命令：`adb shell cmd appops set com.dsh.fpsmeter SYSTEM_ALERT_WINDOW allow`）
+
+### 步骤 3：部署 root 侧脚本
+
+```bash
+adb push fps_feed.sh /data/local/tmp/
+adb shell su -c "mkdir -p /data/adb/JN/bin && cp /data/local/tmp/fps_feed.sh /data/adb/JN/bin/ && chmod 755 /data/adb/JN/bin/fps_feed.sh"
+```
+
+### 步骤 4：启动脚本
+
+```bash
+adb shell su -c "setsid sh /data/adb/JN/bin/fps_feed.sh </dev/null >/dev/null 2>&1 &"
+```
+
+启动后检查数据是否产出：
+
+```bash
+adb shell su -c "cat /data/data/com.dsh.fpsmeter/files/fps.txt"
+```
+
+正常应看到类似 `fps: 62.4 duration:1000000 frame_count:64`。
+
+### 步骤 5：开机自启（可选，推荐）
+
+**Magisk / KernelSU**：把脚本放进 `/data/adb/service.d/`
+
+```bash
+adb shell su -c "cp /data/adb/JN/bin/fps_feed.sh /data/adb/service.d/fps_feed.sh && chmod 755 /data/adb/service.d/fps_feed.sh"
+```
+
+**临时 root / 手动方案**：每次重启后重跑步骤 4。
+
+### 步骤 6：打开悬浮窗
+
+App 内设置好要显示的项 → 点「开启悬浮窗」。
+
+---
+
+## 四、App 内各项设置说明
+
+| 设置 | 作用 |
+|---|---|
+| 显示帧率 / 刷新率 / 电池温度 | 顶栏三行读数开关 |
+| 仅在游戏内显示 | 勾上后只有前台包名命中「游戏列表」才显示 |
+| 允许触摸悬浮窗 | 关掉后悬浮窗完全不拦截触摸（打游戏不误触） |
+| 温度名称显示中文 | `cpu-0-2-1` → `CPU0核2-1`、`gpuss-3` → `GPU核3` |
+| 悬浮窗透明度 / 缩放 | 10–100% / 60–200% |
+| 温度传感器列表（98 项） | 逐项勾选，全选 / 全不选 / 预设「CPU 大核 + GPU」 |
+| 记录帧率/温度曲线 | 开启后写 CSV |
+| 采样间隔 秒 | 2–10 秒，越大越省 |
+| 熄屏 / 待机时也记录 | 默认关；关掉时熄屏不产生数据 |
+| 指定 App 记录 | 填包名 → 只有该 App 前台时才记录 |
+| 单次最长记录 分钟 | 0=不限；到点自动停 |
+| 只保留最近 分钟 | 0=不限；每 60 秒裁剪一次 |
+| 清空记录 | 有二次确认 |
+
+### 悬浮窗本体操作
+
+| 位置 | 操作 |
+|---|---|
+| `⋮⋮` | 按住拖动位置 |
+| `—` | 收起成一条小横条（再点 `▸` 展开） |
+| `✕` | 关闭悬浮窗 |
+| 内容区 | 上下滑动查看全部传感器 |
+
+### 曲线页操作
+
+| 操作 | 效果 |
+|---|---|
+| 点空白处 | 放置白线并显示该点数值 |
+| 按在白线上拖 | 只移动白线，实时读数 |
+| 其他位置横滑 | 平移曲线（看前/后时段） |
+| 双指捏合 | 缩放时间轴 |
+| 缩小 / 放大 / 复位 | 按钮 |
+| 横屏 / 竖屏 | 切换方向，横屏时间轴更宽 |
+| 数值 | 列表点任意一条，曲线跳到该位置 |
+
+---
+
+## 五、数据文件位置
+
+```
+/data/data/com.dsh.fpsmeter/files/
+├── fps.txt          帧率（root 脚本写）
+├── thermal.txt      全部温度（TSV，root 脚本写）
+├── refresh.txt      刷新率
+├── foreground.txt   前台包名
+├── record.csv       曲线记录（时间,FPS,电池,CPU）
+├── record.cfg       记录配置（开关 间隔 熄屏 App 最长 保留）
+├── record.start     单次记录开始时间戳
+└── screen_state     亮屏状态（App 写）
+```
+
+---
+
+## 六、换机型怎么适配
+
+### 1. 帧率节点不同
+
+改 `fps_feed.sh` 顶部：
+
+```sh
+NODE=/sys/class/drm/card0-sde-crtc-0/measured_fps
+```
+
+先用 `probe.sh` 或下面命令找出真实节点：
+
+```bash
+su -c "ls /sys/class/drm/*/measured_fps; ls /sys/kernel/fpsgo/common/ 2>/dev/null"
+```
+
+- 联发科常见：`/sys/kernel/fpsgo/common/fps`
+- 没有硬件节点时，帧率功能不可用（不要用 `dumpsys SurfaceFlinger --latency` 兜底，新 ROM 已裁剪）
+
+### 2. 温度名称映射
+
+`Names.java` 里是按前缀匹配（`cpu-` / `cpullc-` / `gpuss-` / `qmx-` / `nsphvx` …），其他平台出现新前缀（如 `mtktscpu`、`CPU-therm`）时加一条分支即可。
+
+### 3. 包名不同
+
+改 `mkmanifest.py` 里的 `com.dsh.fpsmeter`，同时改 `fps_feed.sh` 里的 `OUTDIR`，否则脚本写不到应用目录。
+
+---
+
+## 七、故障排查
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 帧率一直 `--` | 脚本没跑 / 节点路径不对 | 检查 `files/fps.txt` 是否存在、手动 `cat` 节点 |
+| 温度列表为空 | 脚本没跑 / 目录属主不对 | `su -c "chown <应用uid>:<应用uid> /data/data/com.dsh.fpsmeter/files"` |
+| 记录不增长 | 记录开关没开 / 熄屏 / 前台 App 不匹配 | 看 `record.cfg` 六段配置 |
+| 游戏内不显示 | 「仅在游戏内显示」开着但包名没加进列表 | 设置页输入包名→「加入游戏列表」 |
+| 悬浮窗按钮点不到 | 透明度太低或位置贴边 | 调高透明度、拖回屏幕内 |
+| 重启后数据全无 | 临时 root 失效 | 重跑 root + 第四节步骤 4 |
+| 应用装完闪退 | 设备有调试器/注入框架被壳检测 | 关掉 frida 等调试进程 |
+
+---
+
+## 八、构建
+
+依赖：JDK 8+、Android SDK（`android.jar` + `build-tools` 含 `d8/zipalign/apksigner`）、Python 3。
+
+```bash
+export ANDROID_JAR=/path/to/platforms/android-XX/android.jar
 export BUILD_TOOLS=/path/to/build-tools/xx.x.x
 ./build.sh
 ```
 
-`build.sh` 会：
-1. 用 `mkmanifest.py` 生成二进制 `AndroidManifest.xml`（不依赖 aapt，绕开新版 `resources.arsc` 的兼容问题）
-2. `javac` 编译 → `d8` 转 dex
-3. 打包 + `zipalign` + `apksigner` 签名（首次运行会生成 `ks.jks`）
+`build.sh` 流程：
 
-## 安装与使用
+1. `mkmanifest.py` 生成二进制 `AndroidManifest.xml`（**不用 aapt**，绕开新版 `resources.arsc` 兼容问题）
+2. `javac` → `d8` 得 `classes.dex`
+3. 打包 → `zipalign` → `apksigner`（首次自动生成 `ks.jks`）
 
-1. 安装 APK
-2. 授予「显示在其他应用上层」权限
-3. 把 `fps_feed.sh` 放到 `/data/adb/JN/bin/`（或任意路径），用 root 启动：
-   ```bash
-   su -c "setsid sh /data/adb/JN/bin/fps_feed.sh </dev/null >/dev/null 2>&1 &"
-   ```
-4. 打开 App → 勾选要显示的项 → 开启悬浮窗
+---
 
-> 重启后 root 失效，需要重新执行第 3 步。
+## 九、安全说明
 
-## 兼容性
-
-| 功能 | 依赖 | 说明 |
-|---|---|---|
-| 帧率 | `/sys/class/drm/card0-sde-crtc-0/measured_fps` | 高通 SDE 显示驱动专属；MTK/Exynos 无此节点 |
-| 温度 | `/sys/class/thermal/thermal_zone*` | Linux 标准接口，绝大多数设备可用 |
-| 刷新率 | `dumpsys display` | 通用 |
-| 前台应用 | `dumpsys window` 的 `mCurrentFocus` | 通用，个别 ROM 输出格式不同 |
-| 记录 | root 脚本 | 无 root 时只能读电池温度 |
-
-## 安全说明
-
-- 全部读取均为**只读**（`cat`/`dumpsys`），不写任何系统分区、不改 vbmeta、不动内核参数
-- 不联网、不上传任何数据
-- 记录文件只存在应用私有目录
+- 所有读取均为**只读**（`cat` / `dumpsys`），不写系统分区、不改 vbmeta、不动内核参数
+- 应用**不联网**，不上传任何数据
+- 记录文件只存在应用私有目录，可用「清空记录」删除
+- 仓库不包含签名密钥
 
 ## License
 
