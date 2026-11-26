@@ -1,0 +1,14 @@
+*.apk
+*.jks
+*.keystore
+*.bin
+out/
+dex/
+gen/
+base.apk
+fps_unsigned.apk
+fps_aligned.apk
+fpsmeter.apk
+probe.jar
+jn_fps*.jar
+*.log
