@@ -33,13 +33,17 @@ public class CurveActivity extends Activity {
     private TextView title, detail;
     private CurveView view;
     private List<double[]> pts = new ArrayList<>();
+    private int dayFg = 0xFFFFFFFF, daySub = 0xFF9AA4B2;
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.parseColor("#0F1115"));
+        boolean day = Prefs.dayMode(this);
+        dayFg = day ? 0xFF1A1A1A : 0xFFFFFFFF;
+        daySub = day ? 0xFF5F6B7A : 0xFF9AA4B2;
+        root.setBackgroundColor(day ? 0xFFF7F8FA : 0xFF0F1115);
         boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         root.setPadding(landscape ? 18 : 28, landscape ? 10 : 48, landscape ? 18 : 28, landscape ? 10 : 28);
 
@@ -53,25 +57,44 @@ public class CurveActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         TextView t = new TextView(this);
         t.setText(landscape ? "  帧率 / 温度曲线" : "  帧率 / 温度曲线");
-        t.setTextColor(Color.WHITE);
+        t.setTextColor(dayFg);
         t.setTextSize(landscape ? 15f : 21f);
         topBar.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button clear = new Button(this);
+        clear.setText("清空");
+        clear.setAllCaps(false);
+        clear.setTextSize(13f);
+        clear.setTextColor(Color.WHITE);
+        clear.setPadding(28, 6, 28, 6);
+        clear.setMinWidth(0); clear.setMinimumWidth(0);
+        clear.setMinHeight(0); clear.setMinimumHeight(0);
+        android.graphics.drawable.GradientDrawable cbg = new android.graphics.drawable.GradientDrawable();
+        cbg.setColor(Color.parseColor("#D32F2F"));
+        cbg.setCornerRadius(18f);
+        clear.setBackground(cbg);
+        clear.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { confirmClear(); }
+        });
+        topBar.addView(clear, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(topBar);
 
         title = new TextView(this);
-        title.setTextColor(Color.parseColor("#9AA4B2"));
+        title.setTextColor(daySub);
         title.setTextSize(landscape ? 10f : 12f);
         title.setPadding(0, 6, 0, 6);
         root.addView(title);
 
         detail = new TextView(this);
-        detail.setTextColor(Color.parseColor("#7FD1FF"));
+        detail.setTextColor(day ? 0xFF1565C0 : 0xFF7FD1FF);
         detail.setTextSize(13f);
         detail.setPadding(0, 0, 0, 8);
         detail.setText("拖动白线看数值 · 双指缩放 · 左移/右移平移");
         root.addView(detail);
 
         view = new CurveView(this);
+        view.setDay(Prefs.dayMode(this));
         root.addView(view, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -140,6 +163,31 @@ public class CurveActivity extends Activity {
         return b;
     }
 
+
+    private void confirmClear() {
+        final AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("清空曲线记录？")
+                .setMessage("会删除全部已记录的帧率 / 温度数据，不可恢复。")
+                .setPositiveButton("删除", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        try { new java.io.File(CSV).delete(); } catch (Throwable ignored) {}
+                        load();
+                        detail.setText("记录已清空");
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .create();
+        dlg.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override public void onShow(DialogInterface d) {
+                try {
+                    dlg.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(Color.parseColor("#D32F2F"));
+                    dlg.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(Color.parseColor("#1E88E5"));
+                } catch (Throwable ignored) {}
+            }
+        });
+        dlg.show();
+    }
+
     private void load() {
         pts = new ArrayList<>();
         try {
@@ -206,6 +254,7 @@ public class CurveActivity extends Activity {
 
     static class CurveView extends View {
         private List<double[]> data = new ArrayList<>();
+        private int dayBg = 0xFF12151B;
         private int visStart = 0, visEnd = 0, sel = -1;
         private final Paint pFps = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint pCpu = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -254,6 +303,18 @@ public class CurveActivity extends Activity {
                     return true;
                 }
             });
+        }
+
+        void setDay(boolean day) {
+            dayBg = day ? 0xFFFFFFFF : 0xFF12151B;
+            pGrid.setColor(day ? 0xFFDDE2E9 : 0xFF2A2F38);
+            pText.setColor(day ? 0xFF4A5563 : 0xFF8B93A1);
+            pFpsTxt.setColor(day ? 0xFF0369A1 : 0xFF7FD1FF);
+            pCpuTxt.setColor(day ? 0xFFB45309 : 0xFFFFB74D);
+            pFps.setColor(day ? 0xFF0284C7 : 0xFF4FC3F7);
+            pCpu.setColor(day ? 0xFFD97706 : 0xFFFFB74D);
+            pSel.setColor(day ? 0xFF334155 : 0xFFFFFFFF);
+            invalidate();
         }
 
         void setData(List<double[]> d) { data = d; sel = -1; reset(); invalidate(); }
@@ -372,7 +433,7 @@ public class CurveActivity extends Activity {
         @Override
         protected void onDraw(Canvas c) {
             int w = getWidth(), h = getHeight();
-            c.drawColor(Color.parseColor("#12151B"));
+            c.drawColor(dayBg);
             int padL = 128, padR = 20, padT = 26, padB = 46;
             int gw = w - padL - padR, gh = h - padT - padB;
             if (gw <= 0 || gh <= 0) return;
@@ -384,7 +445,10 @@ public class CurveActivity extends Activity {
             pGrid.setStrokeWidth(1f);
             for (int i = 0; i <= 10; i++) {
                 float y = padT + gh * i / 10f;
-                pGrid.setColor(i % 5 == 0 ? Color.parseColor("#3A4250") : Color.parseColor("#232830"));
+                boolean dayG = dayBg == 0xFFFFFFFF;
+                pGrid.setColor(i % 5 == 0
+                        ? (dayG ? Color.parseColor("#BFC7D2") : Color.parseColor("#3A4250"))
+                        : (dayG ? Color.parseColor("#E6EAF0") : Color.parseColor("#232830")));
                 c.drawLine(padL, y, padL + gw, y, pGrid);
                 int fv = (int) Math.round(maxF * (10 - i) / 10.0);
                 int tv = 100 * (10 - i) / 10;
