@@ -27,7 +27,8 @@ import java.util.Set;
 public class MainActivity extends Activity {
 
     private TextView status, sensorCount;
-    private LinearLayout sensorBox;
+    private int dayFg = 0xFFFFFFFF, daySub = 0xFF9AA4B2, dayLabel = 0xFFD1D5DB, dayHint = 0xFF6B7280;
+    private LinearLayout sensorBox, extraBox;
     private List<String[]> sensors = new ArrayList<>();
 
     @Override
@@ -37,24 +38,29 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(48, 64, 48, 48);
-        root.setBackgroundColor(Color.parseColor("#0F1115"));
+        boolean day = Prefs.dayMode(this);
+        dayFg = day ? 0xFF1A1A1A : 0xFFFFFFFF;
+        daySub = day ? 0xFF5F6B7A : 0xFF9AA4B2;
+        dayLabel = day ? 0xFF3C4450 : 0xFFD1D5DB;
+        dayHint = day ? 0xFF525C6B : 0xFF6B7280;
+        root.setBackgroundColor(day ? 0xFFF7F8FA : 0xFF0F1115);
         sv.addView(root);
 
         TextView title = new TextView(this);
         title.setText("FPS 悬浮窗");
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(dayFg);
         title.setTextSize(25f);
         root.addView(title);
 
         TextView desc = new TextView(this);
         desc.setText("帧率 / 全部温度传感器，可逐项开关；可拖动，长按关闭");
-        desc.setTextColor(Color.parseColor("#9AA4B2"));
+        desc.setTextColor(daySub);
         desc.setTextSize(12f);
         desc.setPadding(0, 8, 0, 16);
         root.addView(desc);
 
         status = new TextView(this);
-        status.setTextColor(Color.parseColor("#E8B04B"));
+        status.setTextColor(day ? 0xFFB26A00 : 0xFFE8B04B);
         status.setTextSize(13f);
         status.setPadding(0, 0, 0, 12);
         root.addView(status);
@@ -90,8 +96,14 @@ public class MainActivity extends Activity {
                 Prefs.get(MainActivity.this).edit().putBoolean("friendly", c).apply();
             }
         }));
-        root.addView(seek("悬浮窗透明度 %", 10, 100, Prefs.alpha(this) * 100 / 255, new IntSetter() {
-            @Override public void set(int v) { Prefs.get(MainActivity.this).edit().putInt("alpha", v * 255 / 100).apply(); }
+        root.addView(check("日间模式（设置页 + 悬浮窗都变浅色）", Prefs.dayMode(this), new CompoundButton.OnCheckedChangeListener() {
+            @Override public void onCheckedChanged(CompoundButton v, boolean c) {
+                Prefs.get(MainActivity.this).edit().putBoolean("dayMode", c).apply();
+                recreate();
+            }
+        }));
+        root.addView(seek("悬浮窗不透明度 %（0=全透明）", 0, 100, Prefs.alpha(this), new IntSetter() {
+            @Override public void set(int v) { Prefs.get(MainActivity.this).edit().putInt("alpha", v).apply(); }
         }));
         root.addView(seek("悬浮窗缩放 %", 60, 200, Prefs.scale(this), new IntSetter() {
             @Override public void set(int v) { Prefs.get(MainActivity.this).edit().putInt("scale", v).apply(); }
@@ -126,8 +138,8 @@ public class MainActivity extends Activity {
         final EditText etTarget = new EditText(this);
         etTarget.setHint("只在指定 App 记录留包名，如 com.tencent.tmgp.pubgmhd（空=全部）");
         etTarget.setText(Prefs.recordTarget(this));
-        etTarget.setTextColor(Color.WHITE);
-        etTarget.setHintTextColor(Color.parseColor("#6B7280"));
+        etTarget.setTextColor(dayFg);
+        etTarget.setHintTextColor(dayHint);
         etTarget.setTextSize(12f);
         etTarget.setSingleLine(true);
         root.addView(etTarget);
@@ -154,21 +166,6 @@ public class MainActivity extends Activity {
             }
         }));
 
-        root.addView(btn("清空记录", new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                new android.app.AlertDialog.Builder(MainActivity.this)
-                        .setTitle("清空曲线记录？")
-                        .setMessage("会删除全部已记录的帧率/温度数据，不可恢复。")
-                        .setPositiveButton("确认清空", new android.content.DialogInterface.OnClickListener() {
-                            @Override public void onClick(android.content.DialogInterface d, int w) {
-                                try { new java.io.File(getFilesDir(), "record.csv").delete(); } catch (Throwable ignored) {}
-                                status.setText("记录已清空");
-                            }
-                        })
-                        .setNegativeButton("取消", null)
-                        .show();
-            }
-        }));
 
         root.addView(btn("开启悬浮窗", new View.OnClickListener() {
             @Override public void onClick(View v) { startMeter(); }
@@ -189,7 +186,7 @@ public class MainActivity extends Activity {
         }));
 
         sensorCount = new TextView(this);
-        sensorCount.setTextColor(Color.WHITE);
+        sensorCount.setTextColor(dayFg);
         sensorCount.setTextSize(14f);
         sensorCount.setPadding(0, 20, 0, 8);
         root.addView(sensorCount);
@@ -223,6 +220,10 @@ public class MainActivity extends Activity {
         sensorBox.setOrientation(LinearLayout.VERTICAL);
         root.addView(sensorBox);
 
+        extraBox = new LinearLayout(this);
+        extraBox.setOrientation(LinearLayout.VERTICAL);
+        root.addView(extraBox);
+
         setContentView(sv);
     }
 
@@ -249,7 +250,7 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         final TextView t = new TextView(this);
         t.setText(label + "：" + cur);
-        t.setTextColor(Color.parseColor("#D1D5DB"));
+        t.setTextColor(dayLabel);
         t.setTextSize(13f);
         t.setPadding(0, 10, 0, 0);
         SeekBar sb = new SeekBar(this);
@@ -272,7 +273,7 @@ public class MainActivity extends Activity {
     private CheckBox check(String label, boolean on, CompoundButton.OnCheckedChangeListener l) {
         CheckBox cb = new CheckBox(this);
         cb.setText(label);
-        cb.setTextColor(Color.WHITE);
+        cb.setTextColor(dayFg);
         cb.setTextSize(14f);
         cb.setChecked(on);
         cb.setOnCheckedChangeListener(l);
@@ -331,7 +332,7 @@ public class MainActivity extends Activity {
         for (final String[] kv : sensors) {
             CheckBox cb = new CheckBox(this);
             cb.setText(kv[0] + "   " + kv[1] + "°C");
-            cb.setTextColor(Color.parseColor("#D1D5DB"));
+            cb.setTextColor(daySub);
             cb.setTextSize(12f);
             cb.setChecked(sel == null || sel.contains(kv[0]));
             cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
@@ -347,6 +348,40 @@ public class MainActivity extends Activity {
                 }
             });
             sensorBox.addView(cb);
+        }
+        buildExtras();
+    }
+
+    /** 非温度节点：单独分组、只读、带注释 */
+    private void buildExtras() {
+        if (extraBox == null) return;
+        extraBox.removeAllViews();
+        java.util.List<String[]> ex = new java.util.ArrayList<>();
+        try {
+            BufferedReader br = new BufferedReader(new FileReader("/data/data/com.dsh.fpsmeter/files/extras.txt"));
+            String line;
+            while ((line = br.readLine()) != null) {
+                int i = line.indexOf('\t');
+                if (i > 0) ex.add(new String[]{line.substring(0, i), line.substring(i + 1)});
+            }
+            br.close();
+        } catch (Throwable ignored) {}
+        if (ex.isEmpty()) return;
+
+        TextView h = new TextView(this);
+        h.setText("\n其他节点（非温度，不做悬浮窗显示）");
+        h.setTextColor(daySub);
+        h.setTextSize(13f);
+        h.setPadding(0, 20, 0, 6);
+        extraBox.addView(h);
+
+        for (String[] kv : ex) {
+            TextView t = new TextView(this);
+            t.setText("· " + kv[0] + "  =  " + Names.value(kv[0], kv[1]) + "\n    " + Names.note(kv[0]));
+            t.setTextColor(daySub);
+            t.setTextSize(11.5f);
+            t.setPadding(0, 4, 0, 4);
+            extraBox.addView(t);
         }
     }
 
