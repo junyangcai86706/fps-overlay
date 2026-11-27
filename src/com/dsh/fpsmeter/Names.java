@@ -33,6 +33,48 @@ public class Names {
         }
     }
 
+    /**
+     * 每个传感器的变色阈值 [黄, 红]（摄氏度）。
+     * PMIC / 供电类测点正常就比其他传感器高，用统一 60/80 会一直标黄，所以单独放宽。
+     */
+    public static float[] thresholds(String type) {
+        if ("sys-therm-9".equals(type)) return new float[]{95f, 110f};       // SoC 供电热点
+        if ("pmih010x_lite_tz".equals(type)) return new float[]{85f, 100f};  // PMIC lite 区
+        if (type.startsWith("sys-therm-")) return new float[]{80f, 100f};
+        if (type.startsWith("pmih") || type.startsWith("pmh") || type.contains("_tz"))
+            return new float[]{80f, 100f};
+        if ("battery".equals(type)) return new float[]{45f, 55f};            // 电池更敏感
+        return new float[]{60f, 80f};                                        // 默认
+    }
+
+    /** 非温度节点的中文注释 */
+    public static String note(String t) {
+        try {
+            if (t.contains("-bcl-lvl")) return "电池电流限制等级（0=未限制，非温度）";
+            if (t.contains("-ibat-lvl")) return "输入电流阈值（mA，非温度）";
+            if ("vbat".equals(t)) return "电池电压（mV，非温度）";
+            if ("usb".equals(t)) return "USB 输入电压（mV，非温度）";
+            if ("socd".equals(t)) return "SoC 裸片（毫度，未校准）";
+            if (t.startsWith("mmw")) return "毫米波 IFIC（未接传感器，-273=无数据）";
+            if (t.startsWith("sdr")) return "SDR 射频通路（未接传感器，-273=无数据）";
+            if (t.contains("trip")) return "降频阈值（温度门限，不是当前温度）";
+            return "内核注册的其它节点";
+        } catch (Throwable e) { return ""; }
+    }
+
+    /** 把原始值转成可读字符串 */
+    public static String value(String type, String raw) {
+        try {
+            long v = Long.parseLong(raw.trim());
+            if (type.contains("-bcl-lvl")) return String.valueOf(v) + " 级";
+            if (type.contains("-ibat-lvl")) return v + " mA";
+            if ("vbat".equals(type) || "usb".equals(type)) return v + " mV";
+            if ("socd".equals(type)) return String.format("%.3f", v / 1000.0) + " ℃";
+            if (v == -273000) return "无数据";
+            return raw;
+        } catch (Throwable e) { return raw; }
+    }
+
     public static String label(String type, boolean friendly) {
         return friendly ? friendly(type) + "（" + type + "）" : type;
     }
