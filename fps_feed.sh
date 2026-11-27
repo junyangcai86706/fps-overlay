@@ -8,7 +8,7 @@ fi
 echo $$ > "$PIDF" 2>/dev/null
 OUTDIR=/data/data/com.dsh.fpsmeter/files
 FPS=$OUTDIR/fps.txt; TH=$OUTDIR/thermal.txt; RF=$OUTDIR/refresh.txt; FG=$OUTDIR/foreground.txt
-REC=$OUTDIR/record.csv; RCFG=$OUTDIR/record.cfg; RSTART=$OUTDIR/record.start
+EXTRAS=$OUTDIR/extras.txt; REC=$OUTDIR/record.csv; RCFG=$OUTDIR/record.cfg; RSTART=$OUTDIR/record.start
 SCR=$OUTDIR/screen_state
 NODE=/sys/class/drm/card0-sde-crtc-0/measured_fps
 BATT=/sys/class/power_supply/battery/temp
@@ -25,20 +25,28 @@ while true; do
     FV=$(printf '%s' "$V" | sed 's/.*fps: *//; s/ .*//')
   fi
   : > "$TH.tmp" 2>/dev/null
+  : > "$EXTRAS.tmp" 2>/dev/null
   CPUMAX=""
   for z in /sys/class/thermal/thermal_zone*; do
     t=$(cat "$z/type" 2>/dev/null); v=$(cat "$z/temp" 2>/dev/null)
     [ -z "$t" ] && continue
-    case "$t" in *trip*) continue;; esac
+    case "$t" in
+      *trip*|*lvl*|*ibat*|*vbat*|*bcl*|mmw*|sdr*|socd*|usb|vbat)
+        printf '%s\t%s\n' "$t" "$v" >> "$EXTRAS.tmp" 2>/dev/null
+        continue;;
+    esac
     case "$v" in ''|-*) continue;; esac
     i=$((v / 1000)); r=$((v % 1000)); d=$(((r + 50) / 100))
     [ "$d" -ge 10 ] && { i=$((i + 1)); d=0; }
+    # 只保留真实温度：1~120℃
+    [ "$i" -ge 1 ] && [ "$i" -le 120 ] || continue
     printf '%s\t%s.%s\n' "$t" "$i" "$d" >> "$TH.tmp" 2>/dev/null
     case "$t" in
       cpu-*|cpullc-*) [ -z "$CPUMAX" ] || [ "$v" -gt "$CPUMAX" ] && CPUMAX=$v;;
     esac
   done
   pub "$TH"
+  pub "$EXTRAS"
   L=$(dumpsys window 2>/dev/null | grep -m1 "mCurrentFocus")
   case "$L" in
     *" u0 "*) P=${L#* u0 }; P=${P%%/*}; P=$(printf '%s' "$P" | tr -d '}');;
