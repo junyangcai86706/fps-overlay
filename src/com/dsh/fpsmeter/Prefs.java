@@ -30,7 +30,14 @@ public class Prefs {
     public static int recordMaxMin(Context c) { return get(c).getInt("recordMaxMin", 0); }
     public static int recordKeepMin(Context c) { return get(c).getInt("recordKeepMin", 0); }
 
-    public static int alpha(Context c) { return get(c).getInt("alpha", 210); }
+    /** 悬浮窗不透明度百分比 0-100（0=完全透明） */
+    public static int alpha(Context c) {
+        int v = get(c).getInt("alpha", 85);
+        if (v > 100) v = Math.round(v * 100f / 255f);   // 兼容旧版 0-255
+        return Math.max(0, Math.min(100, v));
+    }
+    public static boolean dayMode(Context c) { return get(c).getBoolean("dayMode", false); }
+
     public static int scale(Context c) { return get(c).getInt("scale", 100); }
     public static boolean touchable(Context c) { return get(c).getBoolean("touchable", true); }
     public static boolean friendly(Context c) { return get(c).getBoolean("friendly", true); }
